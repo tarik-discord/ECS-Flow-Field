@@ -167,8 +167,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dimensions:
-    x: 100
-    y: 100
+    x: 300
+    y: 300
   destination:
     x: 50
     y: 50

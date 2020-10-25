@@ -34,7 +34,10 @@ namespace Shooter.Pathing
         public void Solve(int2 destTile)
         {
             SimpleFieldSolver solver = new SimpleFieldSolver(field, destTile);
-            solver.Run();
+            JobHandle handle = solver.Schedule();
+            SimpleFieldOutputter outputter = new SimpleFieldOutputter(field, solver.state);
+            handle = outputter.Schedule(field.Height, 1, handle);
+            handle.Complete();
             solver.Dispose();
         }
 
@@ -82,24 +85,73 @@ namespace Shooter.Pathing
         public static readonly int2[] directions = new int2[] { new int2(-1, -1), new int2(-1, 0), new int2(-1, 1), new int2(0, 1), new int2(1, 1), new int2(1, 0), new int2(1, -1), new int2(0, -1) };
 
         [BurstCompile(CompileSynchronously = true)]
+        private struct SimpleFieldOutputter : IJobParallelFor
+        {
+            private NGrid2D<uint> state;
+            private NGrid2D<FlowTile> field;
+
+            public SimpleFieldOutputter(NGrid2D<FlowTile> field, NGrid2D<uint> state)
+            {
+                this.field = field;
+                this.state = state;
+            }
+            public void Execute(int index)
+            {
+                //make the field
+                //this could definitely be done in parallel
+                int2 mapSize = field.Dimensions;
+                int2 mPos = new int2(0, index);
+                int dirLength = directions.Length;
+                //     for (mPos.y = 0; mPos.y < mapSize.y; mPos.y++)
+                {
+                    int mapIndex = index * field.Dimensions.x;
+                    for (mPos.x = 0; mPos.x < mapSize.x; mPos.x++, mapIndex++)
+                    {
+                        byte mask = 0;
+                        uint highValue = uint.MaxValue;
+                        //uint currentCost = state[mPos];
+                        for (int i = 0; i < dirLength; i++)
+                        {
+                            int2 searchPos = mPos + directions[i];
+                            if (math.all(searchPos > 0 & searchPos < mapSize))
+                            {
+                                uint searchVal = state[searchPos];
+                                if (searchVal < highValue)
+                                {
+                                    mask = (byte)i;
+                                    highValue = searchVal;
+                                }
+                            }
+                        }
+                        FlowTile tile = field[mapIndex];
+                        tile.direction = mask;
+                        field[mapIndex] = tile;
+                    }
+                }
+            }
+        }
+
+        public struct SearchNode
+        {
+            public int2 root;
+            public uint cost;
+
+            public SearchNode(int2 root, uint cost)
+            {
+                this.root = root;
+                this.cost = cost;
+            }
+        }
+
+        [BurstCompile(CompileSynchronously = true)]
         private struct SimpleFieldSolver : IJob
         {
 
-            struct SearchNode
-            {
-                public int2 root;
-                public uint cost;
 
-                public SearchNode(int2 root, uint cost)
-                {
-                    this.root = root;
-                    this.cost = cost;
-                }
-            }
 
             private NGrid2D<FlowTile> field;
-            private NGrid2D<uint> state;
-            private NativeQueue<SearchNode> search;
+            public NGrid2D<uint> state;
+            public NativeQueue<SearchNode> search;
             private int2 dest;
 
 
@@ -135,60 +187,34 @@ namespace Shooter.Pathing
                     for (int i = 0; i < dirLength; i++)
                     {
                         int2 searchPos = node.root + directions[i];
-                        if (math.all(searchPos > 0 & searchPos < mapSize))
+                        if (math.all(searchPos >= 0 & searchPos < mapSize))
                         {
-                            uint currentCost = state[searchPos];
+                            int index = state.GetIndexFromPos(searchPos);
+                            uint currentCost = state[index];
                             //if a cheaper parent is already written skip
                             if (currentCost <= node.cost)
                             {
                                 //keep in map bounds
 
-                                FlowTile tile = field[searchPos];
+                                FlowTile tile = field[index];
                                 uint tileCost = node.cost + 1;
                                 //a blocked tile don't search it
                                 if (tile.state != 0)
                                 {
-                                    state[searchPos] = uint.MaxValue;
+                                    state[index] = uint.MaxValue;
                                     continue;
                                 }
                                 //not searched or cheaper add to search
-                                if (state[searchPos] == 0 || state[searchPos] > tileCost)
+                                if (state[index] == 0 || state[index] > tileCost)
                                 {
-                                    state[searchPos] = tileCost;
+                                    state[index] = tileCost;
                                     search.Enqueue(new SearchNode(searchPos, tileCost));
                                 }
                             }
                         }
                     }
                 }
-                //make the field
-                //this could definitely be done in parallel
-                int2 mPos = new int2();
-                for (mPos.y = 0; mPos.y < mapSize.y; mPos.y++)
-                {
-                    for (mPos.x = 0; mPos.x < mapSize.x; mPos.x++)
-                    {
-                        byte mask = 0;
-                        uint highValue = uint.MaxValue;
-                        //uint currentCost = state[mPos];
-                        for (int i = 0; i < dirLength; i++)
-                        {
-                            int2 searchPos = mPos + directions[i];
-                            if (math.all(searchPos > 0 & searchPos < mapSize))
-                            {
-                                uint searchVal = state[searchPos];
-                                if (searchVal < highValue)
-                                {
-                                    mask = (byte)i;
-                                    highValue = searchVal;
-                                }
-                            }
-                        }
-                        FlowTile tile = field[mPos];
-                        tile.direction = mask;
-                        field[mPos] = tile;
-                    }
-                }
+
             }
         }
     }

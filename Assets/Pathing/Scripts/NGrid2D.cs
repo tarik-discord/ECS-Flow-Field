@@ -159,6 +159,11 @@ namespace Shooter.Utility
             return new int2(index % dims.x, index / dims.x);
         }
 
+        public int GetIndexFromPos(int2 index)
+        {
+            return math.dot(index, scaler);
+        }
+
         [BurstDiscard]
         public T[] ToArray()
         {
